@@ -1,0 +1,32 @@
+{
+  "serviceName": "test",
+  "variables": {
+    "varName": "constant"
+  },
+  "contracts": {
+    "ContractKeyName1": {
+      "path": "./contracts/Contract1.sol",
+      "constructorArguments": [
+        "${contracts.ContractKeyName1.address}",
+        "${variables.varName}"
+      ],
+      "initialize": {
+        "functionName": "initialize",
+        "arguments": [
+          "argument1",
+          "argument2"
+        ]
+      }
+    },
+    "ContractKeyName2": {
+      "path": "./contracts/Contract2.sol",
+      "initialize": {
+        "functionName": "initialize",
+        "arguments": [
+          "argument1",
+          "argument2"
+        ]
+      }
+    }
+  }
+}
