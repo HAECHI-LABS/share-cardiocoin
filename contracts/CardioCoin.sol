@@ -21,7 +21,6 @@ contract CardioCoin is ERC20, Ownable {
         string role;
         uint lockUpPeriod;
         uint unlockCount;
-        bool isReseller;
     }
 
     mapping (address => locker) internal lockerList;
@@ -82,16 +81,13 @@ contract CardioCoin is ERC20, Ownable {
                     uint count = calculateUnlockCount(l.unlockTimestamp, l.unlockedCount, l.unlockCount);
                     uint256 unlockedAmount = l.amount.mul(count).div(l.unlockCount);
 
-                    if (unlockedAmount > b.lockedUp) {
-                        unlockedAmount = b.lockedUp;
-                        l.unlockedCount = l.unlockCount;
-                    } else {
-                        b.available = b.available.add(unlockedAmount);
-                        b.lockedUp = b.lockedUp.sub(unlockedAmount);
-                        l.unlockedCount += count;
-                    }
-                    emit TokenUnlocked(_owner, unlockedAmount);
+                    b.available = b.available.add(unlockedAmount);
+                    b.lockedUp = b.lockedUp.sub(unlockedAmount);
+                    l.unlockedCount += count;
                     if (l.unlockedCount == l.unlockCount) {
+                        b.available = b.available.add(b.lockedUp);
+                        unlockedAmount = unlockedAmount.add(b.lockedUp);
+
                         lockUp memory tempA = b.lockUpData[i];
                         lockUp memory tempB = b.lockUpData[b.unlockIndex];
 
@@ -101,6 +97,7 @@ contract CardioCoin is ERC20, Ownable {
                     } else {
                         l.unlockTimestamp += UNLOCK_PERIOD * count;
                     }
+                    emit TokenUnlocked(_owner, unlockedAmount);
                 }
             }
         }
@@ -155,31 +152,12 @@ contract CardioCoin is ERC20, Ownable {
                     uint count = calculateUnlockCount(l.unlockTimestamp, l.unlockedCount, l.unlockCount);
                     uint256 unlockedAmount = l.amount.mul(count).div(l.unlockCount);
 
-                    if (unlockedAmount > lockedUpBalance) {
-                        lockedUpBalance = 0;
-                        break;
-                    } else {
-                        lockedUpBalance = lockedUpBalance.sub(unlockedAmount);
-                    }
+                    lockedUpBalance = lockedUpBalance.sub(unlockedAmount);
                 }
             }
         }
 
         return lockedUpBalance;
-    }
-
-    function transferWithLockUp(address _to, uint256 _value, uint lockUpPeriod, uint unlockCount)
-    public
-    onlyOwner
-    returns (bool) {
-        require(_value <= balances[owner()].available);
-        require(_to != address(0));
-
-        balances[owner()].available = balances[owner()].available.sub(_value);
-        addLockedUpTokens(_to, _value, lockUpPeriod, unlockCount);
-        emit Transfer(msg.sender, _to, _value);
-
-        return true;
     }
 
     // Burnable
@@ -207,6 +185,7 @@ contract CardioCoin is ERC20, Ownable {
         locker storage existsLocker = lockerList[_operator];
 
         require(!existsLocker.isLocker);
+        require(unlockCount > 0);
 
         locker memory l;
 
@@ -214,20 +193,19 @@ contract CardioCoin is ERC20, Ownable {
         l.role = role;
         l.lockUpPeriod = lockUpPeriod;
         l.unlockCount = unlockCount;
-        l.isReseller = false;
         lockerList[_operator] = l;
         emit AddToLocker(_operator, role, lockUpPeriod, unlockCount);
     }
 
-    function lockerInfo(address _operator) public view returns (string memory, uint, uint, bool) {
+    function lockerInfo(address _operator) public view returns (string memory, uint, uint) {
         locker memory l = lockerList[_operator];
 
-        return (l.role, l.lockUpPeriod, l.unlockCount, l.isReseller);
+        return (l.role, l.lockUpPeriod, l.unlockCount);
     }
 
     // Refund
 
-    event RefundRequested(address indexed reuqester, uint256 tokenAmount, uint256 paidAmount);
+    event RefundRequested(address indexed requester, uint256 tokenAmount, uint256 paidAmount);
     event RefundCanceled(address indexed requester);
     event RefundAccepted(address indexed requester, address indexed tokenReceiver, uint256 tokenAmount, uint256 paidAmount);
 
@@ -235,12 +213,11 @@ contract CardioCoin is ERC20, Ownable {
         bool active;
         uint256 tokenAmount;
         uint256 paidAmount;
-        address buyFrom;
     }
 
     mapping (address => refundRequest) internal refundRequests;
 
-    function requestRefund(uint256 paidAmount, address buyFrom) public {
+    function requestRefund(uint256 paidAmount) public {
         require(!refundRequests[msg.sender].active);
 
         refundRequest memory r;
@@ -248,7 +225,6 @@ contract CardioCoin is ERC20, Ownable {
         r.active = true;
         r.tokenAmount = balanceOf(msg.sender);
         r.paidAmount = paidAmount;
-        r.buyFrom = buyFrom;
         refundRequests[msg.sender] = r;
 
         emit RefundRequested(msg.sender, r.tokenAmount, r.paidAmount);
@@ -269,8 +245,8 @@ contract CardioCoin is ERC20, Ownable {
         require(r.active);
         require(balanceOf(requester) == r.tokenAmount);
         require(msg.value == r.paidAmount);
-        require(r.buyFrom == owner());
-        requester.transfer(msg.value);
+        requester.call.value(msg.value);
+//        requester.transfer(msg.value);
         transferForRefund(requester, receiver, r.tokenAmount);
         r.active = false;
         emit RefundAccepted(requester, receiver, r.tokenAmount, msg.value);
@@ -283,8 +259,6 @@ contract CardioCoin is ERC20, Ownable {
     }
 
     function transferForRefund(address from, address to, uint256 amount) internal {
-        require(balanceOf(from) == amount);
-
         unlockBalance(from);
 
         balance storage fromBalance = balances[from];
